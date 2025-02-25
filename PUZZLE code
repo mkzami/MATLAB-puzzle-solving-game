@@ -1,0 +1,269 @@
+classdef puzzle_app_final < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure           matlab.ui.Figure
+        TextArea_2         matlab.ui.control.TextArea
+        TextArea_2Label    matlab.ui.control.Label
+        TextArea           matlab.ui.control.TextArea
+        Label              matlab.ui.control.Label
+        UploadImageButton  matlab.ui.control.Button
+        UITable2           matlab.ui.control.Table
+        UITable            matlab.ui.control.Table
+        UIAxes2            matlab.ui.control.UIAxes
+        UIAxes             matlab.ui.control.UIAxes
+    end
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Button pushed function: UploadImageButton
+        function UploadImageButtonPushed(app, event)
+            [file,path] = uigetfile({'*.jpg;*.png;*.bmp'}, 'Select a Color Image');
+            if isequal(file, 0)
+                return; % User canceled
+            end
+            noisy_image=imread(fullfile(path,file));
+            
+            R_noisy=noisy_image(:,:,1);
+            G_noisy=noisy_image(:,:,2);
+            B_noisy=noisy_image(:,:,3);
+            
+            R_denoised = imnlmfilt(R_noisy);  
+            G_denoised = imnlmfilt(G_noisy);  
+            B_denoised = imnlmfilt(B_noisy);
+            
+            denoised_image = cat(3, R_denoised, G_denoised, B_denoised);
+            grayscale_image = rgb2gray(denoised_image);
+            
+            imshow(denoised_image, 'Parent', app.UIAxes);
+            
+            [height, width] = size(grayscale_image);
+            blockHeight = round(height / 4);
+            blockWidth = round(width / 4);
+            
+            blocks=cell(4,4);
+            
+            blockCount = 0;  
+            for i = 1:4
+                for j = 1:4
+                    % Calculate the row and column boundaries for each block
+                    rowStart = (i-1) * blockHeight + 1;
+                    rowEnd = min(i * blockHeight, height);
+                    colStart = (j-1) * blockWidth + 1;
+                    colEnd = min(j * blockWidth, width);
+                    
+                    % Extract the block from the image
+                    block = denoised_image(rowStart:rowEnd, colStart:colEnd, :);
+                    
+                    % Store the block in the cell array
+                    blocks{i, j} = block;
+                    
+                    % Increment the block counter
+                    blockCount = blockCount + 1;
+                end
+            end
+            % Convert each block to grayscale
+            grayscaleBlocks = cell(4, 4);
+            
+            for i = 1:4
+                for j = 1:4
+                    % Convert each block into grayscale
+                    grayscaleBlocks{i, j} = rgb2gray(blocks{i, j});
+                end
+            end
+            
+            puzzlePiecesDir = 'C:\Users\User\Downloads\EEE4702PUZZLE_C2';
+            Pieces = cell(1, 16);
+            for i = 1:16
+                Pieces{i} = imread(fullfile(puzzlePiecesDir, ['a' num2str(i) '.jpg']));
+            end
+            
+            % Resize the puzzle pieces to match the block size
+            resizedPieces = cell(1, 16);  % Cell array to store resized pieces
+            for i = 1:16
+                resizedPieces{i} = imresize(Pieces{i}, [blockHeight, blockWidth]);  % Resize to match block size
+            end
+            
+            % Convert puzzle pieces to grayscale and resize
+            grayscalePieces = cell(1, 16);
+            for i = 1:16
+                piece = rgb2gray(Pieces{i});
+                grayscalePieces{i} = imresize(piece, [blockHeight, blockWidth]);
+            end
+            
+            optimalPositions = zeros(4, 4);
+            optimalRotations = zeros(4, 4);
+            
+            for i = 1:4
+                for j = 1:4
+                    bestMatch = 0;
+                    bestRotation = 0;
+                    minError = Inf;  % Start with a large error value
+                    
+                    for k = 1:16
+                        % Test all four rotations for the current puzzle piece
+                        for rotation = [0, 90, 180, 270]
+                            % Rotate and resize the puzzle piece to match block size
+                            rotatedPiece = imrotate(grayscalePieces{k}, rotation, 'crop');
+                            resizedPiece = imresize(rotatedPiece, [blockHeight, blockWidth]);
+                            
+                            % Ensure both images are the same size
+                            blockResized = imresize(blocks{i, j}, [blockHeight, blockWidth]);
+                            
+                            % Compute error (using Sum of Absolute Differences as an alternative)
+                            error = sum(sum(abs(double(resizedPiece) - double(blockResized))));
+                            
+                            if error < minError
+                                minError = error;
+                                bestMatch = k;
+                                bestRotation = rotation;
+                            end
+                        end
+                    end
+                    
+                    % Store the best matching piece index and its rotation
+                    optimalPositions(i, j) = bestMatch;
+                    optimalRotations(i, j) = bestRotation;
+                end
+            end
+            
+            % Display Optimal Matrices
+            app.UITable.Data = optimalPositions;
+            app.UITable2.Data = optimalRotations;
+            % Reconstruct the image using the optimal positions and rotations
+            reconstructedImage = zeros(height, width);
+            for i = 1:4
+                for j = 1:4
+                    pieceIndex = optimalPositions(i, j);
+                    rotation = optimalRotations(i, j);
+                    
+                    % Rotate and resize the selected piece to the exact block size
+                    rotatedPiece = imrotate(grayscalePieces{pieceIndex}, rotation, 'crop');
+                    
+                    % Define boundaries in reconstructed image
+                    rowStart = (i-1) * blockHeight + 1;
+                    rowEnd = min(i * blockHeight, height);
+                    colStart = (j-1) * blockWidth + 1;
+                    colEnd = min(j * blockWidth, width);
+                    
+                    % Resize rotated piece to fit exactly within the reconstructed block size
+                    resizedPiece = imresize(rotatedPiece, [rowEnd - rowStart + 1, colEnd - colStart + 1]);
+                    
+                    % Place the resized and rotated piece into the reconstructed image
+                    reconstructedImage(rowStart:rowEnd, colStart:colEnd) = resizedPiece;
+                end
+            end
+            %  Display Reconstructed Image
+            imshow(reconstructedImage, [], 'Parent', app.UIAxes2);
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.Color = [0 0 0];
+            app.UIFigure.Position = [100 100 640 480];
+            app.UIFigure.Name = 'MATLAB App';
+
+            % Create UIAxes
+            app.UIAxes = uiaxes(app.UIFigure);
+            title(app.UIAxes, 'Input Image')
+            app.UIAxes.FontName = 'Cambria';
+            app.UIAxes.FontWeight = 'bold';
+            app.UIAxes.Position = [1 266 317 215];
+
+            % Create UIAxes2
+            app.UIAxes2 = uiaxes(app.UIFigure);
+            title(app.UIAxes2, 'Reconstructed Image ')
+            app.UIAxes2.FontName = 'Cambria';
+            app.UIAxes2.FontWeight = 'bold';
+            app.UIAxes2.Position = [341 266 300 215];
+
+            % Create UITable
+            app.UITable = uitable(app.UIFigure);
+            app.UITable.ColumnName = {'Column 1'; 'Column 2'; 'Column 3'; 'Column 4'};
+            app.UITable.RowName = {};
+            app.UITable.Position = [18 78 300 165];
+
+            % Create UITable2
+            app.UITable2 = uitable(app.UIFigure);
+            app.UITable2.ColumnName = {'Column 1'; 'Column 2'; 'Column 3'; 'Column 4'};
+            app.UITable2.RowName = {};
+            app.UITable2.Position = [341 78 287 165];
+
+            % Create UploadImageButton
+            app.UploadImageButton = uibutton(app.UIFigure, 'push');
+            app.UploadImageButton.ButtonPushedFcn = createCallbackFcn(app, @UploadImageButtonPushed, true);
+            app.UploadImageButton.IconAlignment = 'center';
+            app.UploadImageButton.FontColor = [0.6902 0.2549 0.2549];
+            app.UploadImageButton.Position = [260 28 100 22];
+            app.UploadImageButton.Text = 'Upload Image ';
+
+            % Create Label
+            app.Label = uilabel(app.UIFigure);
+            app.Label.BackgroundColor = [0 0 0];
+            app.Label.HorizontalAlignment = 'right';
+            app.Label.FontColor = [1 1 1];
+            app.Label.Position = [66 43 25 22];
+            app.Label.Text = '';
+
+            % Create TextArea
+            app.TextArea = uitextarea(app.UIFigure);
+            app.TextArea.HorizontalAlignment = 'center';
+            app.TextArea.FontColor = [1 1 1];
+            app.TextArea.BackgroundColor = [0 0 0];
+            app.TextArea.Position = [106 43 105 24];
+            app.TextArea.Value = {'Optimal Position'};
+
+            % Create TextArea_2Label
+            app.TextArea_2Label = uilabel(app.UIFigure);
+            app.TextArea_2Label.BackgroundColor = [0 0 0];
+            app.TextArea_2Label.HorizontalAlignment = 'right';
+            app.TextArea_2Label.FontColor = [1 1 1];
+            app.TextArea_2Label.Position = [413 44 25 22];
+            app.TextArea_2Label.Text = '';
+
+            % Create TextArea_2
+            app.TextArea_2 = uitextarea(app.UIFigure);
+            app.TextArea_2.HorizontalAlignment = 'center';
+            app.TextArea_2.FontColor = [1 1 1];
+            app.TextArea_2.BackgroundColor = [0 0 0];
+            app.TextArea_2.Position = [453 43 104 25];
+            app.TextArea_2.Value = {'Optimal Rotation'};
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = puzzle_app_final
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end
